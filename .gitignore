@@ -1,0 +1,45 @@
+# === Secrets / credentials (DO NOT COMMIT) ===
+.streamlit/secrets.toml
+service_account.json
+.env
+.env.*
+
+# === Python build/cache ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+env.bak/
+.conda/
+
+# === Streamlit local state/cache (safe to ignore) ===
+.streamlit/states/
+.streamlit/cache/
+.streamlit/*.lock
+
+# === Notebooks / checkpoints (optional) ===
+.ipynb_checkpoints/
+*.ipynb
+
+# === Logs ===
+*.log
+
+# === OS artifacts ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Editors / IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
