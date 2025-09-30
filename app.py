@@ -10,14 +10,8 @@ import hashlib
 import calendar
 
 # ===============================
-# 구글시트 연동 (Secrets 사용)
+# 구글시트 연동 (Secrets 우선, 파일은 로컬 개발용 fallback)
 # ===============================
-import streamlit as st
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
-# 시트 ID는 secrets 값이 있으면 그걸 쓰고, 없으면 기존 하드코딩 값을 사용
-SHEET_ID = st.secrets.get("SHEET_ID", "1y1rEG5iPGRiLo2GUzW4YrcWsv6dHChPBQxH033-9pts")
 SHEET_NAME_DATA = "시트1"
 SHEET_NAME_TARGET = "시트2"
 
@@ -25,22 +19,15 @@ scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
 
 def _build_client():
-    """
-    우선순위 1) st.secrets['gcp_service_account'] (배포/운영)
-    우선순위 2) 로컬 개발 편의를 위해 service_account.json 파일 fallback
-    """
-    if "gcp_service_account" in st.secrets:
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(
-            st.secrets["gcp_service_account"], scope
-        )
-    else:
-        # 로컬 개발 시 편의 fallback (파일이 없으면 여기서 에러)
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            "service_account.json", scope
-        )
+    if "gcp_service_account" not in st.secrets:
+        # 배포 환경에서 secrets가 없다면 에러 안내 후 중단
+        st.error("Secrets에 gcp_service_account가 없습니다. Streamlit Cloud의 Secrets에 서비스계정 JSON을 TOML 형식으로 붙여넣어 주세요.")
+        st.stop()
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
     return gspread.authorize(creds)
 
 client = _build_client()
+SHEET_ID = st.secrets.get("SHEET_ID", "1y1rEG5iPGRiLo2GUzW4YrcWsv6dHChPBQxH033-9pts")
 
 # ===============================
 # 데이터 불러오기
@@ -131,7 +118,7 @@ def quarter_months(q: int) -> list:
 # ===============================
 # Streamlit UI (여백/스타일)
 # ===============================
-st.set_page_config(page_title="부크크 매출 정리 앱", layout="wide")
+st.set_page_config(page_title="부크크 매출 현황", layout="wide")
 
 st.markdown("""
 <style>
@@ -162,13 +149,13 @@ h2{margin-top: var(--gap);}
 """, unsafe_allow_html=True)
 
 # 가운데 정렬 타이틀
-st.markdown("<h1 style='text-align:center;margin-top:4px;'>📊 부크크 매출 정리 앱</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center;margin-top:4px;'>📊 부크크 매출 현황</h1>", unsafe_allow_html=True)
 st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
 
 # -------------------------------
-# 기간 선택(요청 반영)
-#  - 기본값: 어제(yesterday)를 종료일, 시작일은 '어제가 속한 월의 1일'
-#  - '최근 한달' 버튼: 실행 월 1일 ~ 어제 (즉시 적용), 조회하기 옆 배치
+# 기간 선택
+#  - 기본값: 종료일=어제, 시작일=해당 월 1일
+#  - 버튼: 최근 한달 / 최근 분기 / 최근 1년 (즉시 적용)
 # -------------------------------
 today = date.today()
 yesterday = today - timedelta(days=1)
@@ -186,7 +173,6 @@ if "applied_end" not in st.session_state:
 
 st.subheader("📅 기간 선택")
 
-# 날짜 입력은 폼, 오른쪽에 '최근 한달' 버튼을 같은 행처럼 배치
 left, right = st.columns([4,1])
 with left:
     with st.form("period_form"):
@@ -199,13 +185,38 @@ with left:
         st.session_state.selected_end = s_end
         st.session_state.applied_start = s_start
         st.session_state.applied_end = s_end
+
 with right:
     st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+
+    # 최근 한달: 실행 월 1일 ~ 어제
     if st.button("최근 한달", help="실행 월 1일 ~ 어제", key="btn-month-now"):
-        st.session_state.selected_start = default_start
-        st.session_state.selected_end = default_end
-        st.session_state.applied_start = default_start
-        st.session_state.applied_end = default_end
+        start = date(yesterday.year, yesterday.month, 1)
+        end = yesterday
+        st.session_state.selected_start = start
+        st.session_state.selected_end = end
+        st.session_state.applied_start = start
+        st.session_state.applied_end = end
+
+    # 최근 분기: 오늘이 속한 분기의 첫날 ~ 어제
+    if st.button("최근 분기", help="해당 연도 현재 분기 시작일 ~ 어제", key="btn-quarter-now"):
+        q = quarter_of_date(today)
+        qms = quarter_months(q)
+        start = date(today.year, qms[0], 1)
+        end = yesterday
+        st.session_state.selected_start = start
+        st.session_state.selected_end = end
+        st.session_state.applied_start = start
+        st.session_state.applied_end = end
+
+    # 최근 1년(연초부터): 해당 연도 1월 1일 ~ 어제
+    if st.button("최근 1년", help="해당 연도 1월 1일 ~ 어제", key="btn-year-now"):
+        start = date(today.year, 1, 1)
+        end = yesterday
+        st.session_state.selected_start = start
+        st.session_state.selected_end = end
+        st.session_state.applied_start = start
+        st.session_state.applied_end = end
 
 # 이후 로직은 '적용된 기간'만 사용
 start_date = st.session_state.applied_start
@@ -283,24 +294,22 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         df_display = pd.DataFrame(rows)
 
         # ===============================
-        # 상단 카드 (요청 반영)
-        #  - '실제 매출' 카드 강조
-        #  - 기존 경과율 카드 대신 'YoY' 카드 추가
+        # 상단 카드 요약 (모든 탭에 적용)
         # ===============================
-        if tab_name == "전체 매출":
-            k1, k2, k3, k4, k5 = st.columns(5)
-            def card(title, value, klass=""):
-                st.markdown(f"""
-                <div class="card {klass}">
-                  <h4>{title}</h4>
-                  <div class="value">{value}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with k1: card("목표 매출", f"{total_target:,} 원")
-            with k2: card("전년 매출", f"{total_prev:,} 원")
-            with k3: card("실제 매출", f"{total_actual:,} 원", "card-primary")
-            with k4: card("달성률", total_achieve, "card-accent")
-            with k5: card("YoY", total_yoy)
+        k1, k2, k3, k4, k5 = st.columns(5)
+        def card(title, value, klass=""):
+            st.markdown(f"""
+            <div class="card {klass}">
+              <h4>{title}</h4>
+              <div class="value">{value}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with k1: card("목표 매출", f"{total_target:,}원")
+        with k2: card("전년 매출", f"{total_prev:,}원")
+        with k3: card("실제 매출", f"{total_actual:,}원", "card-primary")
+        with k4: card("달성률", total_achieve, "card-accent")
+        with k5: card("YoY", total_yoy)
 
         st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
 
@@ -333,14 +342,13 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
 
         # =========================================================
-        #  🎯 목표 달성율 (오늘 기준)  ← 위치: 일일 매출 추이 "위"
-        #  (상단에서 제거한 '경과율' 카드도 여기로 이동)
+        #  🎯 목표 달성율 (오늘 기준)
         # =========================================================
         st.markdown("### 🎯 목표 달성율 (오늘 기준)")
 
         vendors_all = base_vendors[:]  # 전체 매출 기준
 
-        # 어제 기준으로 클램프: 연초(1/1)에는 실제 0 처리
+        # 어제 기준으로 클램프
         today_d = date.today()
         yday = today_d - timedelta(days=1)
 
@@ -358,7 +366,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         qtd_end = clamp_end(qtd_start, yday)
         mtd_end = clamp_end(mtd_start, yday)
 
-        # 실제 매출 합계 (YTD/QTD/MTD)
+        # 실제 매출 합계
         def actual_sum_in_range(d1: date, d2: date):
             if d2 < d1:
                 return 0
@@ -406,7 +414,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         with gc2: donut("분기 달성율", actual_qtd, target_qtd, f"{tab_name}-quarter")
         with gc3: donut("월 달성율",   actual_mtd, target_mtd, f"{tab_name}-month")
 
-        # ➜ 경과율(어제 기준) 카드 세트(여기로 이동)
+        # ➜ 경과율(어제 기준)
         ref = yday
         # 연도
         y_start = date(today_d.year, 1, 1)
@@ -451,7 +459,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
 
         # ===============================
-        # 일일 매출 추이 (동요일 보정)
+        # 일일 매출 추이 (올해 vs 작년, 동요일 보정)
         # ===============================
         st.markdown("### 📈 일일 매출 추이 (올해 vs 작년, 동요일 기준)")
         daily_current = df_period[["날짜"] + available_vendors].copy()
@@ -490,8 +498,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
 
         # =========================================================
-        #  거래처별 및 분야별 매출 추이 (월별, 최근 3개 연도 자동 / 2열)
-        #   - 미래연도(올해 초과)는 제외하여 2023~올해까지만에서 최근 3년 선택
+        #  거래처별 및 분야별 매출 추이 (월별, 최근 3개 연도)
         # =========================================================
         st.markdown("### 📈 거래처별 및 분야별 매출 추이 (월별, 최근 3개 연도)")
 
@@ -501,7 +508,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
 
         this_year = date.today().year
         year_list_all = sorted(int(y) for y in df_all["연"].dropna().unique())
-        year_list_clip = [y for y in year_list_all if y <= this_year]  # ✅ 미래연도 제외
+        year_list_clip = [y for y in year_list_all if y <= this_year]  # 미래연도 제외
         years = year_list_clip[-3:] if len(year_list_clip) >= 3 else year_list_clip
 
         def monthly_series_for_cols(cols):
