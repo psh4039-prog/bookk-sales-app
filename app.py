@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, date
@@ -41,13 +42,22 @@ df_target = pd.DataFrame(ws_target.get_all_records())
 df_data["날짜"] = pd.to_datetime(df_data["날짜"], errors="coerce")
 
 # ===============================
-# 기본 구성
+# 거래처/분야 구성
+#  - 요청: '밀리의서재', '크레마클럽' 추가
+#  - '전체 매출' 순서: 영풍 다음에 두 구독사
+#  - '구독' 탭 신설
 # ===============================
-base_vendors = ["PG사", "예스24", "교보문고", "알라딘", "영풍"]
+base_vendors = [
+    "PG사", "예스24", "교보문고", "알라딘", "영풍",
+    "밀리의서재", "크레마클럽"                    # <<< 추가
+]
+subscription_vendors = ["밀리의서재", "크레마클럽"]  # <<< 구독 그룹
+
 vendor_groups = {
     "전체 매출": base_vendors,
     "리커버": ["교보 리커버", "예스 리커버", "알라딘 리커버", "영풍(리커버)"],
-    "전자책": ["예스(전자책)", "알라딘(전자)"]
+    "전자책": ["예스(전자책)", "알라딘(전자)"],
+    "구독": subscription_vendors,                 # <<< 신설 탭
 }
 
 # ===============================
@@ -56,6 +66,7 @@ vendor_groups = {
 def clean_numeric(df, cols):
     safe = [c for c in cols if c in df.columns]
     if not safe:
+        # 안전한 컬럼이 없을 때 빈 DF 반환
         return pd.DataFrame(index=df.index)
     out = df[safe].apply(
         lambda x: pd.to_numeric(
@@ -65,6 +76,14 @@ def clean_numeric(df, cols):
         axis=0
     ).fillna(0)
     return out
+
+def sum_for(df, vendors):
+    """요청: 컬럼이 없을 때도 0 처리(테이블에 행을 유지하기 위함)."""
+    nums = clean_numeric(df, vendors)
+    result = {}
+    for v in vendors:
+        result[v] = float(nums[v].sum()) if (not nums.empty and v in nums.columns) else 0.0
+    return result
 
 def highlight_total(row):
     return ['font-weight: bold' if row['거래처'] == '합계' else '' for _ in row]
@@ -82,6 +101,9 @@ def calc_target_sum(vendors, start_date, end_date):
                 if v in df_target["거래처"].values:
                     val = df_target.loc[df_target["거래처"] == v, month_key].values[0]
                     target_sum[v] += int(str(val).replace(",", "")) if val else 0
+                else:
+                    # 요청: 타겟 시트에 행이 없으면 0
+                    target_sum[v] += 0
     return target_sum
 
 def target_sum_for_months(vendors, year, month_list):
@@ -95,6 +117,8 @@ def target_sum_for_months(vendors, year, month_list):
                 if v in df_target["거래처"].values:
                     val = df_target.loc[df_target["거래처"] == v, key].values[0]
                     total += int(str(val).replace(",", "")) if val else 0
+                else:
+                    total += 0
     return total
 
 def month_name_kor(m): return f"{m}월"
@@ -117,7 +141,7 @@ st.markdown("""
 .block-container{
   max-width: 1360px;
   padding: 0 1.5rem;
-  padding-top: 1.9rem;           /* << 상단 패딩 추가: 타이틀 잘림 방지 */
+  padding-top: 1.9rem;    /* 타이틀 잘림 방지 */
 }
 .section-gap{height: var(--gap);}
 .small-muted{color:#6b7280;font-size:12px}
@@ -140,10 +164,10 @@ h2{margin-top: var(--gap);}
 .delta-neg{color:#2563eb}  /* - : 파랑 */
 .main-title{
   text-align:center;
-  margin: 18px 0 12px;           /* << 타이틀 위아래 여백 확대 */
+  margin: 18px 0 12px;
   padding-top: 6px;
 }
-.kpi-table-gap{height: 20px;}    /* << 카드-표 사이 간격 */
+.kpi-table-gap{height: 20px;}  /* 카드-표 사이 간격 넓힘 */
 </style>
 """, unsafe_allow_html=True)
 
@@ -220,15 +244,16 @@ def render_top_cards(total_target, total_prev, total_actual):
     yoy = f"{((total_actual-total_prev)/total_prev*100):.1f}%" if total_prev>0 else "-"
     c1,c2,c3,c4,c5 = st.columns(5)
     with c1:
-        st.markdown(f"<div class='card'><h4>목표 매출</h4><div class='value'>{total_target:,} 원</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><h4>목표 매출</h4><div class='value'>{total_target:,.0f} 원</div></div>", unsafe_allow_html=True)
     with c2:
-        st.markdown(f"<div class='card'><h4>전년 매출</h4><div class='value'>{total_prev:,} 원</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><h4>전년 매출</h4><div class='value'>{total_prev:,.0f} 원</div></div>", unsafe_allow_html=True)   # ← 변경
     with c3:
-        st.markdown(f"<div class='card card-primary'><h4>실제 매출</h4><div class='value'>{total_actual:,} 원</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card card-primary'><h4>실제 매출</h4><div class='value'>{total_actual:,.0f} 원</div></div>", unsafe_allow_html=True) # ← 변경
     with c4:
         st.markdown(f"<div class='card'><h4>달성률</h4><div class='value'>{ach}</div></div>", unsafe_allow_html=True)
     with c5:
         st.markdown(f"<div class='card'><h4>YoY</h4><div class='value'>{yoy}</div></div>", unsafe_allow_html=True)
+
 
 # ===============================
 # 탭
@@ -240,38 +265,36 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         st.subheader(f"📊 {tab_name}")
 
         vendors = vendor_groups[tab_name]
-        available = [v for v in vendors if v in df_period.columns]
 
-        # 실제(기간)
-        nums = clean_numeric(df_period, available)
-        actual_sum = nums.sum().to_dict()
-
-        # 전년 동기간
+        # 실제(기간) / 전년 동기간(기간) — 컬럼이 없어도 0 처리
         sdt = pd.to_datetime(start_date)
         edt = pd.to_datetime(end_date)
+
+        actual_sum = sum_for(df_period, vendors)
+
         ly_s = sdt.replace(year=sdt.year-1); ly_e = edt.replace(year=edt.year-1)
         df_ly = df_data[(df_data["날짜"] >= ly_s) & (df_data["날짜"] <= ly_e)]
-        prev_sum = clean_numeric(df_ly, available).sum().to_dict()
+        prev_sum = sum_for(df_ly, vendors)
 
         # 목표(기간 월 합)
-        target_sum = calc_target_sum(available, sdt, edt)
+        target_sum = calc_target_sum(vendors, sdt, edt)
 
         # 상단 KPI 카드 (탭별)
         T = sum(target_sum.values()); P = sum(prev_sum.values()); A = sum(actual_sum.values())
         render_top_cards(T, P, A)
 
-        # << 여기! 카드와 표 사이 간격을 넓힘
+        # 카드-표 간격
         st.markdown("<div class='kpi-table-gap'></div>", unsafe_allow_html=True)
 
-        # 표
+        # 표(요청: 컬럼 없어도 행을 보이게, 모두 vendors 기준으로 생성)
         rows = []
-        for v in available:
+        for v in vendors:
             a = actual_sum.get(v, 0); p = prev_sum.get(v, 0); t = target_sum.get(v, 0)
             achieve = f"{(a/t*100):.1f}%" if t>0 else "-"
             yoy     = f"{((a-p)/p*100):.1f}%" if p>0 else "-"
-            rows.append({"거래처":v,"목표 매출":f"{t:,} 원","전년 매출":f"{p:,} 원","실제 매출":f"{a:,} 원","달성률":achieve,"YoY":yoy})
+            rows.append({"거래처":v,"목표 매출":f"{t:,.0f} 원","전년 매출":f"{p:,.0f} 원","실제 매출":f"{a:,.0f} 원","달성률":achieve,"YoY":yoy})
 
-        rows.append({"거래처":"합계","목표 매출":f"{T:,} 원","전년 매출":f"{P:,} 원","실제 매출":f"{A:,} 원",
+        rows.append({"거래처":"합계","목표 매출":f"{T:,.0f} 원","전년 매출":f"{P:,.0f} 원","실제 매출":f"{A:,.0f} 원",
                      "달성률":f"{(A/T*100):.1f}%" if T>0 else "-",
                      "YoY":f"{((A-P)/P*100):.1f}%" if P>0 else "-"})
         st.dataframe(
@@ -283,13 +306,12 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
 
         # 증감액
         st.markdown(f"""
-        <div class="footer-cards">
-          <div class="footer-card"><div class="title">전년 대비 증가액</div><div class="val">{A-P:+,} 원</div></div>
-          <div class="footer-card"><div class="title">목표 대비 증가액</div><div class="val">{A-T:+,} 원</div></div>
-        </div>
-        """, unsafe_allow_html=True)
+<div class="footer-cards">
+  <div class="footer-card"><div class="title">전년 대비 증가액</div><div class="val">{A-P:+,.0f} 원</div></div>  
+  <div class="footer-card"><div class="title">목표 대비 증가액</div><div class="val">{A-T:+,.0f} 원</div></div>  
+</div>
+""", unsafe_allow_html=True)
 
-        st.markdown("<div class='section-gap'></div>", unsafe_allow_html=True)
 
         # =======================
         # 🎯 목표 달성율 (어제 기준)
@@ -297,7 +319,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         st.markdown("### 🎯 목표 달성율")
 
         base = yesterday
-        vendors_all = base_vendors
+        vendors_all = base_vendors  # 연/분기/월 총합은 전체 거래처 기준
 
         y_start = date(base.year, 1, 1)
         q = quarter_of_date(base); qms = quarter_months(q); q_start = date(base.year, qms[0], 1)
@@ -306,7 +328,8 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         def actual_sum_in_range(d1: date, d2: date):
             if d2 < d1: return 0
             m = (df_data["날짜"] >= pd.to_datetime(d1)) & (df_data["날짜"] <= pd.to_datetime(d2))
-            return clean_numeric(df_data.loc[m], vendors_all).sum(axis=1).sum()
+            return clean_numeric(df_data.loc[m], [c for c in vendors_all if c in df_data.columns])\
+                        .sum(axis=1).sum()
 
         actual_y = actual_sum_in_range(y_start, base)
         actual_q = actual_sum_in_range(q_start, base)
@@ -385,18 +408,19 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
         # 일일 매출 추이 (동요일 보정)
         # =======================
         st.markdown("### 📈 일일 매출 추이 (올해 vs 작년, 동요일 기준)")
-        daily_cur = df_period[["날짜"] + available].copy()
-        daily_cur[available] = clean_numeric(daily_cur, available)
-        daily_cur["합계"] = daily_cur[available].sum(axis=1)
+        safe_cols = [c for c in vendors if c in df_period.columns]
+        daily_cur = df_period[["날짜"] + safe_cols].copy()
+        daily_cur[safe_cols] = clean_numeric(daily_cur, safe_cols)
+        daily_cur["합계"] = daily_cur[safe_cols].sum(axis=1)
 
         wd_diff = (sdt.weekday() - sdt.replace(year=sdt.year - 1).weekday())
         ly_start_g = sdt.replace(year=sdt.year - 1) + timedelta(days=wd_diff)
         ly_end_g   = ly_start_g + (edt - sdt)
         df_ly_g = df_data[(df_data["날짜"] >= ly_start_g) & (df_data["날짜"] <= ly_end_g)].copy()
 
-        daily_ly = df_ly_g[["날짜"] + available].copy()
-        daily_ly[available] = clean_numeric(daily_ly, available)
-        daily_ly["합계"] = daily_ly[available].sum(axis=1)
+        daily_ly = df_ly_g[["날짜"] + safe_cols].copy()
+        daily_ly[safe_cols] = clean_numeric(daily_ly, safe_cols)
+        daily_ly["합계"] = daily_ly[safe_cols].sum(axis=1)
 
         n = min(len(daily_cur), len(daily_ly))
         df_chart = pd.DataFrame({
@@ -415,6 +439,7 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
 
         # =======================
         # 월별 추이 (최근 3년, 확정된 월만)
+        #  - 요청: '구독(분야)' 그래프 추가
         # =======================
         st.markdown("### 📈 거래처별 및 분야별 매출 추이 (월별, 최근 3개 연도)")
         df_all = df_data.copy()
@@ -463,10 +488,12 @@ for tab_name, tab in zip(vendor_groups.keys(), tabs):
             st.plotly_chart(fig, use_container_width=True,
                             key=unique_key("trend", tname, title, idx, "-".join(map(str,years))))
 
+        # 요청: 거래처 개별 + 분야(전체/리커버/전자책/구독)
         vendor_panels = [("합계(거래처)", base_vendors)] + [(v,[v]) for v in base_vendors]
         field_panels  = [("전체매출(분야)", base_vendors),
                          ("리커버(분야)", vendor_groups["리커버"]),
-                         ("전자책(분야)", vendor_groups["전자책"])]
+                         ("전자책(분야)", vendor_groups["전자책"]),
+                         ("구독(분야)", subscription_vendors)]  # <<< 추가
         panels = vendor_panels + field_panels
 
         for i in range(0, len(panels), 2):
